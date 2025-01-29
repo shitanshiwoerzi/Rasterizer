@@ -41,11 +41,11 @@ public:
 		vec4 result;
 
 		// load the vector and 4 rows of matrix
-		__m128 vec = _mm_loadu_ps(v.v);
-		__m128 row0 = _mm_loadu_ps(&a[0]);
-		__m128 row1 = _mm_loadu_ps(&a[4]);
-		__m128 row2 = _mm_loadu_ps(&a[8]);
-		__m128 row3 = _mm_loadu_ps(&a[12]);
+		__m128 vec = _mm_load_ps(v.v);
+		__m128 row0 = _mm_load_ps(&a[0]);
+		__m128 row1 = _mm_load_ps(&a[4]);
+		__m128 row2 = _mm_load_ps(&a[8]);
+		__m128 row3 = _mm_load_ps(&a[12]);
 
 		// dot product
 		// put result to the register x channel
@@ -71,10 +71,10 @@ public:
 		matrix ret;
 
 		// load left matrix
-		__m128 row0 = _mm_loadu_ps(&a[0]);
-		__m128 row1 = _mm_loadu_ps(&a[4]);
-		__m128 row2 = _mm_loadu_ps(&a[8]);
-		__m128 row3 = _mm_loadu_ps(&a[12]);
+		__m128 row0 = _mm_load_ps(&a[0]);
+		__m128 row1 = _mm_load_ps(&a[4]);
+		__m128 row2 = _mm_load_ps(&a[8]);
+		__m128 row3 = _mm_load_ps(&a[12]);
 
 		// 4 columns of the right matrix 'mx'
 		for (int col = 0; col < 4; ++col) {
