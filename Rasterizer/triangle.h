@@ -6,6 +6,8 @@
 #include "light.h"
 #include <iostream>
 #include <immintrin.h>
+#include <xmmintrin.h>
+#include <smmintrin.h>   // SSE4.1
 
 struct LineFunc {
 	float A, B, C;
@@ -132,6 +134,13 @@ public:
 		int endX = (int)ceil(maxV.x);
 		int endY = (int)ceil(maxV.y);
 
+		// AVX segements
+		int width = endX - startX;
+		if (width <= 0) return;
+		int aligned = (width / 8) * 8; // divisible part
+		int leftover = width - aligned;
+
+
 		// compute function of 3 lines in the start position
 		float f0row = lf0.A * startX + lf0.B * startY + lf0.C;
 		float f1row = lf1.A * startX + lf1.B * startY + lf1.C;
@@ -147,11 +156,84 @@ public:
 			float f0 = f0row;
 			float f1 = f1row;
 			float f2 = f2row;
-			for (int x = startX; x < endX; x++) {
-				// Check if the pixel lies inside the triangle
-				if (f0 >= 0 && f1 >= 0 && f2 >= 0) {
+
+			// pixels in avx
+			for (int offset = 0; offset < aligned; offset += 8) {
+				int x = startX + offset;
+				__m256 vf0 = _mm256_setr_ps(
+					f0 + 0 * dfx0, f0 + 1 * dfx0, f0 + 2 * dfx0, f0 + 3 * dfx0,
+					f0 + 4 * dfx0, f0 + 5 * dfx0, f0 + 6 * dfx0, f0 + 7 * dfx0);
+
+				__m256 vf1 = _mm256_setr_ps(
+					f1 + 0 * dfx1, f1 + 1 * dfx1, f1 + 2 * dfx1, f1 + 3 * dfx1,
+					f1 + 4 * dfx1, f1 + 5 * dfx1, f1 + 6 * dfx1, f1 + 7 * dfx1);
+
+				__m256 vf2 = _mm256_setr_ps(
+					f2 + 0 * dfx2, f2 + 1 * dfx2, f2 + 2 * dfx2, f2 + 3 * dfx2,
+					f2 + 4 * dfx2, f2 + 5 * dfx2, f2 + 6 * dfx2, f2 + 7 * dfx2);
+
+				// compare with 0
+				__m256 zero = _mm256_set1_ps(0.0f);
+				// in SSE4, cmpge_ps => _CMP_GE_OQ
+				__m256 mask0 = _mm256_cmp_ps(vf0, zero, _CMP_GE_OQ);
+				__m256 mask1 = _mm256_cmp_ps(vf1, zero, _CMP_GE_OQ);
+				__m256 mask2 = _mm256_cmp_ps(vf2, zero, _CMP_GE_OQ);
+
+				// inTri = mask0 & mask1 & mask2
+				__m256 inTri = _mm256_and_ps(_mm256_and_ps(mask0, mask1), mask2);
+
+				int bits = _mm256_movemask_ps(inTri);
+
+				// Check if one of 8 pixels lies inside the triangle
+				if (bits != 0) {
+					for (int i = 0; i < 8; i++)
+					{
+						int mask = (1 << i);
+						// if this one pixel is in the triangle
+						if ((bits & mask) != 0)
+						{
+							float alpha, beta, gamma;
+							if (getCoordinates(vec2D((float)(x + i), (float)y), alpha, beta, gamma)) {
+								// Interpolate color, depth, and normals
+								colour c = interpolate(beta, gamma, alpha, v[0].rgb, v[1].rgb, v[2].rgb);
+								c.clampColour();
+								float depth = interpolate(beta, gamma, alpha, v[0].p[2], v[1].p[2], v[2].p[2]);
+								vec4 normal = interpolate(beta, gamma, alpha, v[0].normal, v[1].normal, v[2].normal);
+								normal.normalise();
+
+								// Perform Z-buffer test and apply shading
+								if (renderer.zbuffer(x + i, y) > depth && depth > 0.01f) {
+									// typical shader begin
+									L.omega_i.normalise();
+									float dot = max(vec4::dot(L.omega_i, normal), 0.0f);
+									colour a = (c * kd) * (L.L * dot + (L.ambient * kd));
+									// typical shader end
+									unsigned char r, g, b;
+									a.toRGB(r, g, b);
+									renderer.canvas.draw(x + i, y, r, g, b);
+									renderer.zbuffer(x + i, y) = depth;
+								}
+							}
+						}
+					}
+				}
+
+				// move to next pixel with increment x and y
+				f0 += 8 * dfx0;
+				f1 += 8 * dfx1;
+				f2 += 8 * dfx2;
+			}
+
+			// processing remaining pixels
+			int xLeft = startX + aligned;
+			for (int i = 0; i < leftover; i++) {
+				int xx = xLeft + i;
+				float f0_cur = f0 + i * dfx0;
+				float f1_cur = f1 + i * dfx1;
+				float f2_cur = f2 + i * dfx2;
+				if (f0_cur >= 0 && f1_cur >= 0 && f2_cur >= 0) {
 					float alpha, beta, gamma;
-					if (getCoordinates(vec2D((float)x, (float)y), alpha, beta, gamma)) {
+					if (getCoordinates(vec2D((float)xx, (float)y), alpha, beta, gamma)) {
 						// Interpolate color, depth, and normals
 						colour c = interpolate(beta, gamma, alpha, v[0].rgb, v[1].rgb, v[2].rgb);
 						c.clampColour();
@@ -160,7 +242,7 @@ public:
 						normal.normalise();
 
 						// Perform Z-buffer test and apply shading
-						if (renderer.zbuffer(x, y) > depth && depth > 0.01f) {
+						if (renderer.zbuffer(xx, y) > depth && depth > 0.01f) {
 							// typical shader begin
 							L.omega_i.normalise();
 							float dot = max(vec4::dot(L.omega_i, normal), 0.0f);
@@ -168,16 +250,11 @@ public:
 							// typical shader end
 							unsigned char r, g, b;
 							a.toRGB(r, g, b);
-							renderer.canvas.draw(x, y, r, g, b);
-							renderer.zbuffer(x, y) = depth;
+							renderer.canvas.draw(xx, y, r, g, b);
+							renderer.zbuffer(xx, y) = depth;
 						}
 					}
 				}
-
-				// move to next pixel with increment x and y
-				f0 += dfx0;
-				f1 += dfx1;
-				f2 += dfx2;
 			}
 
 			// end this row and to the next row

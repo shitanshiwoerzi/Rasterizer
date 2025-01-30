@@ -5,6 +5,7 @@
 #include "GamesEngineeringBase.h" // Include the GamesEngineeringBase header
 #include <algorithm>
 #include <chrono>
+#include <thread>
 
 #include <cmath>
 #include "matrix.h"
@@ -255,135 +256,197 @@ void scene2() {
 		delete m;
 }
 
-// 这个场景会生成大量随机变换的网格，模拟较大负载，
-// 并在渲染循环里给你一个“并行渲染”的钩子（可先单线程跑，也可后续改成多线程）。
-void sceneParallel()
-{
+void scene3() {
 	Renderer renderer;
-	matrix camera = matrix::makeTranslation(0.f, 0.f, -6.f);
+	// 初始相机为 Identity
+	matrix camera = matrix::makeIdentity();
+
+	// 定义灯光
 	Light L{ vec4(0.f, 1.f, 1.f, 0.f),
 			 colour(1.0f, 1.0f, 1.0f),
 			 colour(0.1f, 0.1f, 0.1f) };
 
-	bool running = true;
+	// 存储场景对象 & 它们的随机旋转参数
 	std::vector<Mesh*> scene;
+	struct rRot { float x; float y; float z; }; // Structure to store random rotation parameters
+	std::vector<rRot> rotations;
 
-	// put some cubes
-	int countX = 20;
-	int countY = 20;
-	for (int i = 0; i < countY; i++)
-	{
-		for (int j = 0; j < countX; j++)
-		{
+	RandomNumberGenerator& rng = RandomNumberGenerator::getInstance();
+
+	for (int row = 0; row < 250; row++) {
+		for (int col = 0; col < 250; col++) {
 			Mesh* m = new Mesh();
 			*m = Mesh::makeCube(1.f);
-			// random location
-			float px = -15.f + j * 1.5f;
-			float py = 10.f - i * 1.5f;
-			float pz = -40.f - i * 0.2f;
-			// random rotation
-			matrix rot = matrix::makeRotateXYZ(
-				0.05f * (i + j),
-				0.03f * (i + j),
-				0.02f * (i + j));
-			m->world = matrix::makeTranslation(px, py, pz) * rot;
-			m->ka = 0.2f;
-			m->kd = 0.8f;
 			scene.push_back(m);
+			// put in a location of grid
+			float px = -20.f + (col * 2.0f);
+			float py = 20.f - (row * 2.0f);
+			float pz = -20.f - row * 0.2f;
+			m->world = matrix::makeTranslation(px, py, pz);
+			// random rotation
+			rRot r{ rng.getRandomFloat(-.1f, .1f), rng.getRandomFloat(-.1f, .1f), rng.getRandomFloat(-.1f, .1f) };
+			rotations.push_back(r);
+
 		}
 	}
 
-	// a sphere
-	{
-		Mesh* sphere = new Mesh();
-		*sphere = Mesh::makeSphere(1.0f, 15, 25);
-		sphere->world = matrix::makeTranslation(0.f, -5.f, -10.f);
-		sphere->ka = 0.1f; sphere->kd = 1.0f;
-		scene.push_back(sphere);
-	}
+	// Create a sphere and add it to the scene
+	Mesh* sphere = new Mesh();
+	*sphere = Mesh::makeSphere(1.0f, 10, 20);
+	scene.push_back(sphere);
+	float sphereOffset = -6.f;
+	float sphereStep = 0.1f;
+	sphere->world = matrix::makeTranslation(sphereOffset, 0.f, -6.f);
 
 	auto start = std::chrono::high_resolution_clock::now();
 	std::chrono::time_point<std::chrono::high_resolution_clock> end;
 	int cycle = 0;
 
-	// --- 2) 主循环：演示单线程渲染（可留钩子给并行渲染） ---
-	while (running)
-	{
+	bool running = true;
+	while (running) {
 		renderer.canvas.checkInput();
 		renderer.clear();
 
-		// 处理键盘输入 (ESC退出等)
-		if (renderer.canvas.keyPressed(VK_ESCAPE))
-			break;
+		// 3) 更新每个立方体的world(加一个随机旋转)
+		//    这样可以制造持续的运算负载
+		for (size_t i = 0; i < rotations.size(); i++) {
+			scene[i]->world = scene[i]->world *
+				matrix::makeRotateXYZ(rotations[i].x,
+					rotations[i].y,
+					rotations[i].z);
+		}
 
-		// let the camera move from -30 to 6
-		static float camStep = -0.1f;
-		static float zoffset = 6.f;
-		zoffset += camStep;
-
-		if (zoffset < -30.f || zoffset > 6.f) {
-			camStep = -camStep;
+		// Move the sphere back and forth
+		sphereOffset += sphereStep;
+		sphere->world = matrix::makeTranslation(sphereOffset, 0.f, -6.f);
+		if (sphereOffset > 6.0f || sphereOffset < -6.0f) {
+			sphereStep *= -1.f;
 			if (++cycle % 2 == 0) {
 				end = std::chrono::high_resolution_clock::now();
 				std::cout << cycle / 2 << " :" << std::chrono::duration<double, std::milli>(end - start).count() << "ms\n";
 				start = std::chrono::high_resolution_clock::now();
 			}
 		}
-		camera = matrix::makeTranslation(0.f, 0.f, -zoffset);
 
-		// 让其中一些物体转动以测试负载
-		// 例如前10个物体
-		for (int i = 0; i < 100 && i < (int)scene.size(); i++)
-		{
-			scene[i]->world = scene[i]->world *
-				matrix::makeRotateXYZ(0.01f, 0.02f, 0.01f);
-		}
+		if (renderer.canvas.keyPressed(VK_ESCAPE)) break;
 
-		// ------------- 以下是关键：渲染场景 -------------
-		// 单线程渲染方式： (跟 scene1/scene2 里一样)
-		/*
+		// 5) 渲染场景 (单线程)
+		//    可在 render() 函数内部做向量化，或对 scene 分块并行
 		for (auto& m : scene)
 			render(renderer, m, camera, L);
-		*/
-
-		// 多线程渲染思路,把 scene 分段给多个线程
-		// 注意 Z-buffer 共享或分块问题，需要自行处理
-		/*
-		const int numThreads = 4;
-		std::vector<std::thread> workers;
-		auto renderFunc = [&](int startIdx, int endIdx){
-			for(int i=startIdx; i<endIdx; i++){
-				render(renderer, scene[i], camera, L);
-			}
-		};
-		int slice = (int)scene.size() / numThreads;
-		int remainder = (int)scene.size() % numThreads;
-
-		int currentIdx = 0;
-		for(int t=0; t<numThreads; t++){
-			int nextIdx = currentIdx + slice + (t < remainder? 1:0);
-			workers.emplace_back(renderFunc, currentIdx, nextIdx);
-			currentIdx = nextIdx;
-		}
-		// 等待所有线程完成
-		for(auto &w : workers){
-			w.join();
-		}
-		*/
-
-		// 先用(A)测试跑通，再根据需要切换到(B)并自己处理Z-buffer并发/分块等
-
-		// 这里先用单线程(A)默认
-		for (auto& m : scene)
-			render(renderer, m, camera, L);
-
-		// 呈现
 		renderer.present();
 	}
 
-	// 释放资源
-	for (auto& m : scene)
+	for (auto& m : scene) {
 		delete m;
+	}
+}
+
+const int NUM_THREADS = 4;
+
+// 渲染函数的线程安全包装
+void renderChunk(Renderer& renderer, const std::vector<Mesh*>& chunk, matrix& camera, Light& L) {
+	for (auto& m : chunk) {
+		render(renderer, m, camera, L);
+	}
+}
+
+void scene3Mt() {
+	Renderer renderer;
+	// 初始相机为 Identity
+	matrix camera = matrix::makeIdentity();
+
+	// 定义灯光
+	Light L{ vec4(0.f, 1.f, 1.f, 0.f),
+			 colour(1.0f, 1.0f, 1.0f),
+			 colour(0.1f, 0.1f, 0.1f) };
+
+	// 存储场景对象 & 它们的随机旋转参数
+	std::vector<Mesh*> scene;
+	struct rRot { float x; float y; float z; }; // Structure to store random rotation parameters
+	std::vector<rRot> rotations;
+
+	RandomNumberGenerator& rng = RandomNumberGenerator::getInstance();
+
+	for (int row = 0; row < 250; row++) {
+		for (int col = 0; col < 250; col++) {
+			Mesh* m = new Mesh();
+			*m = Mesh::makeCube(1.f);
+			scene.push_back(m);
+			// put in a location of grid
+			float px = -20.f + (col * 2.0f);
+			float py = 20.f - (row * 2.0f);
+			float pz = -20.f - row * 0.2f;
+			m->world = matrix::makeTranslation(px, py, pz);
+			// random rotation
+			rRot r{ rng.getRandomFloat(-.1f, .1f), rng.getRandomFloat(-.1f, .1f), rng.getRandomFloat(-.1f, .1f) };
+			rotations.push_back(r);
+
+		}
+	}
+
+	// Create a sphere and add it to the scene
+	Mesh* sphere = new Mesh();
+	*sphere = Mesh::makeSphere(1.0f, 10, 20);
+	scene.push_back(sphere);
+	float sphereOffset = -6.f;
+	float sphereStep = 0.1f;
+	sphere->world = matrix::makeTranslation(sphereOffset, 0.f, -6.f);
+
+	auto start = std::chrono::high_resolution_clock::now();
+	std::chrono::time_point<std::chrono::high_resolution_clock> end;
+	int cycle = 0;
+
+	bool running = true;
+	while (running) {
+		renderer.canvas.checkInput();
+		renderer.clear();
+
+		// update rotation world matrix
+		for (size_t i = 0; i < rotations.size(); i++) {
+			scene[i]->world = scene[i]->world *
+				matrix::makeRotateXYZ(rotations[i].x,
+					rotations[i].y,
+					rotations[i].z);
+		}
+
+		// Move the sphere back and forth
+		sphereOffset += sphereStep;
+		sphere->world = matrix::makeTranslation(sphereOffset, 0.f, -6.f);
+		if (sphereOffset > 6.0f || sphereOffset < -6.0f) {
+			sphereStep *= -1.f;
+			if (++cycle % 2 == 0) {
+				end = std::chrono::high_resolution_clock::now();
+				std::cout << cycle / 2 << " :" << std::chrono::duration<double, std::milli>(end - start).count() << "ms\n";
+				start = std::chrono::high_resolution_clock::now();
+			}
+		}
+
+		if (renderer.canvas.keyPressed(VK_ESCAPE)) break;
+
+		// Multi-threaded
+		// 1. divide scene into NUM_THREADS parts
+		std::vector<std::vector<Mesh*>> chunks(NUM_THREADS);
+		for (size_t i = 0; i < scene.size(); i++) {
+			chunks[i % NUM_THREADS].push_back(scene[i]);
+		}
+
+		// 2. create and start threads
+		std::vector<std::thread> threads;
+		for (int t = 0; t < NUM_THREADS; t++) {
+			threads.emplace_back(renderChunk, std::ref(renderer), std::ref(chunks[t]), std::ref(camera), std::ref(L));
+		}
+
+		// 3. wait all threads done
+		for (auto& th : threads) {
+			th.join();
+		}
+		renderer.present();
+	}
+
+	for (auto& m : scene) {
+		delete m;
+	}
 }
 
 // Entry point of the application
@@ -392,7 +455,8 @@ int main() {
 	// Uncomment the desired scene function to run
 	//scene1();
 	scene2();
-	//sceneParallel();
+	//scene3();
+	//scene3Mt();
 
 
 	return 0;
