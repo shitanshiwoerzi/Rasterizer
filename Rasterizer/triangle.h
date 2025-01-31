@@ -118,6 +118,13 @@ public:
 	void draw(Renderer& renderer, Light& L, float ka, float kd) {
 		vec2D minV, maxV;
 
+		// normalize the light direction
+		vec4 normalizedOmega = L.omega_i;
+		normalizedOmega.normalise();
+		__m256 omega_x = _mm256_set1_ps(normalizedOmega.x);
+		__m256 omega_y = _mm256_set1_ps(normalizedOmega.y);
+		__m256 omega_z = _mm256_set1_ps(normalizedOmega.z);
+
 		// Get the screen-space bounds of the triangle
 		getBoundsWindow(renderer.canvas, minV, maxV);
 
@@ -203,10 +210,29 @@ public:
 
 								// Perform Z-buffer test and apply shading
 								if (renderer.zbuffer(x + i, y) > depth && depth > 0.01f) {
-									// typical shader begin
-									L.omega_i.normalise();
-									float dot = max(vec4::dot(L.omega_i, normal), 0.0f);
-									colour a = (c * kd) * (L.L * dot + (L.ambient * kd));
+									// typical shader start
+									// compute dot product with avx
+									__m256 norm_x = _mm256_set1_ps(normal.x);
+									__m256 norm_y = _mm256_set1_ps(normal.y);
+									__m256 norm_z = _mm256_set1_ps(normal.z);
+
+									__m256 dot = _mm256_max_ps(
+										_mm256_set1_ps(0.0f),
+										_mm256_add_ps(
+											_mm256_mul_ps(omega_x, norm_x),
+											_mm256_add_ps(
+												_mm256_mul_ps(omega_y, norm_y),
+												_mm256_mul_ps(omega_z, norm_z)
+											)
+										)
+									);
+
+									// get dot result
+									float dotVal = _mm256_cvtss_f32(dot);
+
+									// compute light
+									colour a = (c * kd) * (L.L * dotVal + (L.ambient * kd));
+
 									// typical shader end
 									unsigned char r, g, b;
 									a.toRGB(r, g, b);

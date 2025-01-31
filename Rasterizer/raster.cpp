@@ -258,23 +258,20 @@ void scene2() {
 
 void scene3() {
 	Renderer renderer;
-	// 初始相机为 Identity
 	matrix camera = matrix::makeIdentity();
 
-	// 定义灯光
 	Light L{ vec4(0.f, 1.f, 1.f, 0.f),
 			 colour(1.0f, 1.0f, 1.0f),
 			 colour(0.1f, 0.1f, 0.1f) };
 
-	// 存储场景对象 & 它们的随机旋转参数
 	std::vector<Mesh*> scene;
 	struct rRot { float x; float y; float z; }; // Structure to store random rotation parameters
 	std::vector<rRot> rotations;
 
 	RandomNumberGenerator& rng = RandomNumberGenerator::getInstance();
 
-	for (int row = 0; row < 250; row++) {
-		for (int col = 0; col < 250; col++) {
+	for (int row = 0; row < 200; row++) {
+		for (int col = 0; col < 200; col++) {
 			Mesh* m = new Mesh();
 			*m = Mesh::makeCube(1.f);
 			scene.push_back(m);
@@ -307,8 +304,6 @@ void scene3() {
 		renderer.canvas.checkInput();
 		renderer.clear();
 
-		// 3) 更新每个立方体的world(加一个随机旋转)
-		//    这样可以制造持续的运算负载
 		for (size_t i = 0; i < rotations.size(); i++) {
 			scene[i]->world = scene[i]->world *
 				matrix::makeRotateXYZ(rotations[i].x,
@@ -330,8 +325,7 @@ void scene3() {
 
 		if (renderer.canvas.keyPressed(VK_ESCAPE)) break;
 
-		// 5) 渲染场景 (单线程)
-		//    可在 render() 函数内部做向量化，或对 scene 分块并行
+		// single thread
 		for (auto& m : scene)
 			render(renderer, m, camera, L);
 		renderer.present();
@@ -344,7 +338,6 @@ void scene3() {
 
 const int NUM_THREADS = 4;
 
-// 渲染函数的线程安全包装
 void renderChunk(Renderer& renderer, const std::vector<Mesh*>& chunk, matrix& camera, Light& L) {
 	for (auto& m : chunk) {
 		render(renderer, m, camera, L);
@@ -353,23 +346,19 @@ void renderChunk(Renderer& renderer, const std::vector<Mesh*>& chunk, matrix& ca
 
 void scene3Mt() {
 	Renderer renderer;
-	// 初始相机为 Identity
 	matrix camera = matrix::makeIdentity();
-
-	// 定义灯光
 	Light L{ vec4(0.f, 1.f, 1.f, 0.f),
 			 colour(1.0f, 1.0f, 1.0f),
 			 colour(0.1f, 0.1f, 0.1f) };
 
-	// 存储场景对象 & 它们的随机旋转参数
 	std::vector<Mesh*> scene;
 	struct rRot { float x; float y; float z; }; // Structure to store random rotation parameters
 	std::vector<rRot> rotations;
 
 	RandomNumberGenerator& rng = RandomNumberGenerator::getInstance();
 
-	for (int row = 0; row < 250; row++) {
-		for (int col = 0; col < 250; col++) {
+	for (int row = 0; row < 200; row++) {
+		for (int col = 0; col < 200; col++) {
 			Mesh* m = new Mesh();
 			*m = Mesh::makeCube(1.f);
 			scene.push_back(m);
@@ -454,8 +443,8 @@ void scene3Mt() {
 int main() {
 	// Uncomment the desired scene function to run
 	//scene1();
-	scene2();
-	//scene3();
+	//scene2();
+	scene3();
 	//scene3Mt();
 
 
