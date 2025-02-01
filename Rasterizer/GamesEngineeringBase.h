@@ -1,4 +1,4 @@
-/*
+﻿/*
 MIT License
 
 Copyright (c) 2024 MSc Games Engineering Team
@@ -36,6 +36,9 @@ SOFTWARE.
 #include <atlbase.h>
 #include <Xinput.h>
 #include <math.h>
+#include <immintrin.h>
+#include <xmmintrin.h>
+#include <smmintrin.h>   // SSE4.1
 
 // Link necessary libraries
 #pragma comment(lib, "D3D11.lib")
