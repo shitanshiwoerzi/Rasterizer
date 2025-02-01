@@ -64,7 +64,7 @@ public:
 		area = abs(e1.x * e2.y - e1.y * e2.x);
 	}
 
-	LineFunc getArguments(vec2D v1, vec2D v2) {
+	inline LineFunc getArguments(vec2D v1, vec2D v2) {
 		// f(x,y) = (y - v1.y)*(v2.x - v1.x)-(x - v1.x)*(v2.y - v1.y) 
 		// same as 'e-q' in getC
 		LineFunc lf;
@@ -79,13 +79,13 @@ public:
 	// Input Variables:
 	// - v1, v2: Edges defining the vector
 	// - p: Point for which coordinates are being calculated
-	float getC(vec2D v1, vec2D v2, vec2D p) {
+	inline float getC(vec2D v1, vec2D v2, vec2D p) {
 		vec2D e = v2 - v1;
 		vec2D q = p - v1;
 		return q.y * e.x - q.x * e.y;
 	}
 
-	__m256 getC_avx(vec2D v1, vec2D v2, __m256 px, __m256 py) {
+	inline __m256 getC_avx(vec2D v1, vec2D v2, __m256 px, __m256 py) {
 		__m256 e_x = _mm256_set1_ps(v2.x - v1.x);
 		__m256 e_y = _mm256_set1_ps(v2.y - v1.y);
 		__m256 q_x = _mm256_sub_ps(px, _mm256_set1_ps(v1.x));
@@ -100,7 +100,7 @@ public:
 	// Output Variables:
 	// - alpha, beta, gamma: Barycentric coordinates of the point
 	// Returns true if the point is inside the triangle, false otherwise
-	bool getCoordinates(vec2D p, float& alpha, float& beta, float& gamma) {
+	inline bool getCoordinates(vec2D p, float& alpha, float& beta, float& gamma) {
 		alpha = getC(vec2D(v[0].p), vec2D(v[1].p), p) / area;
 		beta = getC(vec2D(v[1].p), vec2D(v[2].p), p) / area;
 		gamma = getC(vec2D(v[2].p), vec2D(v[0].p), p) / area;
@@ -119,7 +119,7 @@ public:
 		return (a1 * alpha) + (a2 * beta) + (a3 * gamma);
 	}
 
-	__m256 interpolate_avx(__m256 alpha, __m256 beta, __m256 gamma, float a1, float a2, float a3) {
+	inline __m256 interpolate_avx(__m256 alpha, __m256 beta, __m256 gamma, float a1, float a2, float a3) {
 		__m256 v1 = _mm256_set1_ps(a1);
 		__m256 v2 = _mm256_set1_ps(a2);
 		__m256 v3 = _mm256_set1_ps(a3);
@@ -131,7 +131,7 @@ public:
 		);
 	}
 
-	void interpolate_avx_color(__m256 alpha, __m256 beta, __m256 gamma,
+	inline void interpolate_avx_color(__m256 alpha, __m256 beta, __m256 gamma,
 		colour c1, colour c2, colour c3,
 		__m256& r, __m256& g, __m256& b) {
 		__m256 r1 = _mm256_set1_ps(c1.r);

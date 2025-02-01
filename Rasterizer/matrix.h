@@ -8,7 +8,7 @@
 
 // Matrix class for 4x4 transformation matrices
 class matrix {
-	alignas(16) float a[16];
+	alignas(32) float a[16];
 
 public:
 	// Default constructor initializes the matrix as an identity matrix

@@ -4,13 +4,13 @@
 
 // The `vec4` class represents a 4D vector and provides operations such as scaling, addition, subtraction, 
 // normalization, and vector products (dot and cross).
-class alignas(16) vec4 {
+class alignas(32) vec4 {
 public:
 	union {
 		struct {
 			float x, y, z, w; // Components of the vector
 		};
-		alignas(16) float v[4];           // Array representation of the vector components
+		alignas(32) float v[4];           // Array representation of the vector components
 	};
 
 	// Constructor to initialize the vector with specified values.
