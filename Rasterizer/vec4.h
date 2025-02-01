@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <immintrin.h>
 
 // The `vec4` class represents a 4D vector and provides operations such as scaling, addition, subtraction, 
 // normalization, and vector products (dot and cross).
@@ -33,7 +34,13 @@ public:
 	// - scalar: Value to scale the vector by
 	// Returns a new scaled `vec4`.
 	vec4 operator*(float scalar) const {
-		return { x * scalar, y * scalar, z * scalar, w * scalar };
+		__m128 va = _mm_load_ps(v);
+		__m128 vs = _mm_set1_ps(scalar);
+		__m128 vc = _mm_mul_ps(va, vs);
+		vec4 result;
+		_mm_store_ps(result.v, vc);
+		return result;
+		//return { x * scalar, y * scalar, z * scalar, w * scalar };
 	}
 
 	// Divides the vector by its W component and sets W to 1.
@@ -66,7 +73,13 @@ public:
 	// - other: The vector to subtract
 	// Returns a new `vec4` resulting from the subtraction.
 	vec4 operator-(const vec4& other) const {
-		return vec4(x - other.x, y - other.y, z - other.z, 0.0f);
+		__m128 va = _mm_load_ps(v);
+		__m128 vb = _mm_load_ps(other.v);
+		__m128 vc = _mm_sub_ps(va, vb);
+		vec4 result;
+		_mm_store_ps(result.v, vc);
+		return result;
+		//return vec4(x - other.x, y - other.y, z - other.z, 0.0f);
 	}
 
 	// Adds another vector to this vector.
@@ -74,7 +87,13 @@ public:
 	// - other: The vector to add
 	// Returns a new `vec4` resulting from the addition.
 	vec4 operator+(const vec4& other) const {
-		return vec4(x + other.x, y + other.y, z + other.z, 0.0f);
+		__m128 va = _mm_load_ps(v);        
+		__m128 vb = _mm_load_ps(other.v); 
+		__m128 vc = _mm_add_ps(va, vb);
+		vec4 result;
+		_mm_store_ps(result.v, vc);
+		return result;
+		//return vec4(x + other.x, y + other.y, z + other.z, 0.0f);
 	}
 
 	// Computes the cross product of two vectors.

@@ -465,7 +465,7 @@ namespace GamesEngineeringBase
 		}
 
 		// Draws a pixel at (x, y) with the specified RGB color
-		void draw(int x, int y, unsigned char r, unsigned char g, unsigned char b)
+		inline void draw(int x, int y, unsigned char r, unsigned char g, unsigned char b)
 		{
 			int index = ((y * width) + x) * 3;
 			image[index] = r;

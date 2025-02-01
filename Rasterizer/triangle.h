@@ -135,26 +135,28 @@ public:
 		colour c1, colour c2, colour c3,
 		__m256& r, __m256& g, __m256& b) {
 		__m256 r1 = _mm256_set1_ps(c1.r);
-		__m256 g1 = _mm256_set1_ps(c1.g);
-		__m256 b1 = _mm256_set1_ps(c1.b);
-
 		__m256 r2 = _mm256_set1_ps(c2.r);
-		__m256 g2 = _mm256_set1_ps(c2.g);
-		__m256 b2 = _mm256_set1_ps(c2.b);
-
 		__m256 r3 = _mm256_set1_ps(c3.r);
+		r = _mm256_fmadd_ps(alpha, r1, _mm256_fmadd_ps(beta, r2, _mm256_mul_ps(gamma, r3)));
+
+		__m256 g1 = _mm256_set1_ps(c1.g);
+		__m256 g2 = _mm256_set1_ps(c2.g);
 		__m256 g3 = _mm256_set1_ps(c3.g);
+		g = _mm256_fmadd_ps(alpha, g1, _mm256_fmadd_ps(beta, g2, _mm256_mul_ps(gamma, g3)));
+
+		__m256 b1 = _mm256_set1_ps(c1.b);
+		__m256 b2 = _mm256_set1_ps(c2.b);
 		__m256 b3 = _mm256_set1_ps(c3.b);
+		b = _mm256_fmadd_ps(alpha, b1, _mm256_fmadd_ps(beta, b2, _mm256_mul_ps(gamma, b3)));
+		//// r = alpha * r1 + beta * r2 + gamma * r3
+		//r = _mm256_add_ps(_mm256_mul_ps(alpha, r1),
+		//	_mm256_add_ps(_mm256_mul_ps(beta, r2), _mm256_mul_ps(gamma, r3)));
 
-		// r = alpha * r1 + beta * r2 + gamma * r3
-		r = _mm256_add_ps(_mm256_mul_ps(alpha, r1),
-			_mm256_add_ps(_mm256_mul_ps(beta, r2), _mm256_mul_ps(gamma, r3)));
+		//g = _mm256_add_ps(_mm256_mul_ps(alpha, g1),
+		//	_mm256_add_ps(_mm256_mul_ps(beta, g2), _mm256_mul_ps(gamma, g3)));
 
-		g = _mm256_add_ps(_mm256_mul_ps(alpha, g1),
-			_mm256_add_ps(_mm256_mul_ps(beta, g2), _mm256_mul_ps(gamma, g3)));
-
-		b = _mm256_add_ps(_mm256_mul_ps(alpha, b1),
-			_mm256_add_ps(_mm256_mul_ps(beta, b2), _mm256_mul_ps(gamma, b3)));
+		//b = _mm256_add_ps(_mm256_mul_ps(alpha, b1),
+		//	_mm256_add_ps(_mm256_mul_ps(beta, b2), _mm256_mul_ps(gamma, b3)));
 	}
 
 	// Draw the triangle on the canvas
@@ -194,64 +196,63 @@ public:
 		int aligned = (width / 8) * 8; // divisible part
 		int leftover = width - aligned;
 
-		// compute function of 3 lines in the start position
-		float f0row = lf0.A * startX + lf0.B * startY + lf0.C;
-		float f1row = lf1.A * startX + lf1.B * startY + lf1.C;
-		float f2row = lf2.A * startX + lf2.B * startY + lf2.C;
+		//// compute function of 3 lines in the start position
+		//float f0row = lf0.A * startX + lf0.B * startY + lf0.C;
+		//float f1row = lf1.A * startX + lf1.B * startY + lf1.C;
+		//float f2row = lf2.A * startX + lf2.B * startY + lf2.C;
 
-		// increment x,y of lf0,1,2
-		float dfx0 = lf0.A, dfy0 = lf0.B;
-		float dfx1 = lf1.A, dfy1 = lf1.B;
-		float dfx2 = lf2.A, dfy2 = lf2.B;
+		////barycentric in start position
+		//float area_inv = 1.0f / area;
+		//float alpha0 = f0row * area_inv;
+		//float beta0 = f1row * area_inv;
+		//float gamma0 = f2row * area_inv;
+
+		// barycentric in start position
+		float area_inv = 1.0f / area;
+		float alpha0 = (lf0.A * startX + lf0.B * startY + lf0.C) * area_inv;
+		float beta0 = (lf1.A * startX + lf1.B * startY + lf1.C) * area_inv;
+		float gamma0 = (lf2.A * startX + lf2.B * startY + lf2.C) * area_inv;
+
+		float alphaDx = lf0.A * area_inv;
+		float betaDx = lf1.A * area_inv;
+		float gammaDx = lf2.A * area_inv;
+
+		float alphaDy = lf0.B * area_inv;
+		float betaDy = lf1.B * area_inv;
+		float gammaDy = lf2.B * area_inv;
 
 		__m256 x_offset = _mm256_setr_ps(0, 1, 2, 3, 4, 5, 6, 7);
-		__m256 step0 = _mm256_mul_ps(x_offset, _mm256_set1_ps(dfx0));
-		__m256 step1 = _mm256_mul_ps(x_offset, _mm256_set1_ps(dfx1));
-		__m256 step2 = _mm256_mul_ps(x_offset, _mm256_set1_ps(dfx2));
 
 		// Iterate over the bounding box and check each pixel
 		for (int y = startY; y < endY; y++) {
-			float f0 = f0row;
-			float f1 = f1row;
-			float f2 = f2row;
+			float rowAlpha = alpha0 + (y - startY) * alphaDy;
+			float rowBeta = beta0 + (y - startY) * betaDy;
+			float rowGamma = gamma0 + (y - startY) * gammaDy;
 
 			// pixels in avx
 			for (int offset = 0; offset < aligned; offset += 8) {
 				int x = startX + offset;
-				__m256 vf0 = _mm256_add_ps(_mm256_set1_ps(f0), step0);
-				__m256 vf1 = _mm256_add_ps(_mm256_set1_ps(f1), step1);
-				__m256 vf2 = _mm256_add_ps(_mm256_set1_ps(f2), step2);
 
-				__m256 zero = _mm256_set1_ps(-1e-6);
-				__m256 inTri = _mm256_and_ps(_mm256_and_ps(_mm256_cmp_ps(vf0, zero, _CMP_GE_OQ),
-					_mm256_cmp_ps(vf1, zero, _CMP_GE_OQ)),
-					_mm256_cmp_ps(vf2, zero, _CMP_GE_OQ));
+				__m256 base_alpha = _mm256_set1_ps(rowAlpha + offset * alphaDx);
+				__m256 base_beta = _mm256_set1_ps(rowBeta + offset * betaDx);
+				__m256 base_gamma = _mm256_set1_ps(rowGamma + offset * gammaDx);
+
+				__m256 alpha = _mm256_add_ps(base_alpha, _mm256_mul_ps(x_offset, _mm256_set1_ps(alphaDx)));
+				__m256 beta = _mm256_add_ps(base_beta, _mm256_mul_ps(x_offset, _mm256_set1_ps(betaDx)));
+				__m256 gamma = _mm256_add_ps(base_gamma, _mm256_mul_ps(x_offset, _mm256_set1_ps(gammaDx)));
+
+				__m256 zero = _mm256_set1_ps(0.0f);
+				__m256 inTri = _mm256_and_ps(_mm256_and_ps(_mm256_cmp_ps(alpha, zero, _CMP_GE_OQ),
+					_mm256_cmp_ps(beta, zero, _CMP_GE_OQ)),
+					_mm256_cmp_ps(gamma, zero, _CMP_GE_OQ));
 
 				int mask = _mm256_movemask_ps(inTri);
-
-				__m256 vx = _mm256_add_ps(_mm256_set1_ps(x), _mm256_setr_ps(0, 1, 2, 3, 4, 5, 6, 7));
-				__m256 vy = _mm256_set1_ps(y);
-
-				__m256 inv_area = _mm256_set1_ps(1.0f / area);
-
-				__m256 c0 = getC_avx(vec2D(v[0].p), vec2D(v[1].p), vx, vy);
-				__m256 c1 = getC_avx(vec2D(v[1].p), vec2D(v[2].p), vx, vy);
-				__m256 c2 = getC_avx(vec2D(v[2].p), vec2D(v[0].p), vx, vy);
-
-				__m256 alpha = _mm256_mul_ps(c0, inv_area);
-				__m256 beta = _mm256_mul_ps(c1, inv_area);
-				__m256 gamma = _mm256_mul_ps(c2, inv_area);
-
-				alignas(32) float alpha_vals[8], beta_vals[8], gamma_vals[8];
-				_mm256_storeu_ps(alpha_vals, alpha);
-				_mm256_storeu_ps(beta_vals, beta);
-				_mm256_storeu_ps(gamma_vals, gamma);
 
 				if (mask != 0) {
 					for (int i = 0; i < 8; i++) {
 						if ((mask & (1 << i)) == 0) continue;
+						int px = x + i;
 
-						// compute colour, depth and normal
 						__m256 r, g, b;
 						interpolate_avx_color(beta, gamma, alpha, v[0].rgb, v[1].rgb, v[2].rgb, r, g, b);
 
@@ -284,8 +285,6 @@ public:
 						alignas(32) float depth_vals[8];
 						_mm256_storeu_ps(depth_vals, depth);
 
-						//if (mask & (1 << i)) {
-						int px = x + i;
 						if (renderer.zbuffer(px, y) > depth_vals[i] && depth_vals[i] > 0.01f) {
 							// compute light
 							__m256 dot = _mm256_max_ps(zero, _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(omega_x, norm_x),
@@ -319,74 +318,74 @@ public:
 							g = _mm256_mul_ps(g, _mm256_set1_ps(255));
 							b = _mm256_mul_ps(b, _mm256_set1_ps(255));
 
-							//__m256i r_int = _mm256_cvtps_epi32(r);
-							//__m256i g_int = _mm256_cvtps_epi32(g);
-							//__m256i b_int = _mm256_cvtps_epi32(b);
 
-							// 提取 `r, g, b` 标量数据
-							alignas(32) float r_vals[8], g_vals[8], b_vals[8];
-							_mm256_storeu_ps(r_vals, r);
-							_mm256_storeu_ps(g_vals, g);
-							_mm256_storeu_ps(b_vals, b);
+							__m256i r_int = _mm256_cvtps_epi32(r);
+							__m256i g_int = _mm256_cvtps_epi32(g);
+							__m256i b_int = _mm256_cvtps_epi32(b);
+
+							alignas(32) int r_vals[8], g_vals[8], b_vals[8];
+							_mm256_store_si256((__m256i*)r_vals, r_int);
+							_mm256_store_si256((__m256i*)g_vals, g_int);
+							_mm256_store_si256((__m256i*)b_vals, b_int);
+
+							//// 提取 `r, g, b` 标量数据
+							//alignas(32) float r_vals[8], g_vals[8], b_vals[8];
+							//_mm256_storeu_ps(r_vals, r);
+							//_mm256_storeu_ps(g_vals, g);
+							//_mm256_storeu_ps(b_vals, b);
+
 
 							// 写入颜色
-							unsigned char cr = static_cast<unsigned char>(std::floor(r_vals[i]));
-							unsigned char cg = static_cast<unsigned char>(std::floor(g_vals[i]));
-							unsigned char cb = static_cast<unsigned char>(std::floor(b_vals[i]));
+							unsigned char cr = static_cast<unsigned char>((r_vals[i]));
+							unsigned char cg = static_cast<unsigned char>((g_vals[i]));
+							unsigned char cb = static_cast<unsigned char>((b_vals[i]));
 							renderer.canvas.draw(px, y, cr, cg, cb);
-							//renderer.canvas.draw_avx(px, y, r_int, g_int, b_int);
+							//renderer.canvas.draw(px, y, 255, 255, 0);
 
 							// 更新 Z-buffer
 							renderer.zbuffer(px, y) = depth_vals[i];
-							//}
 						}
 					}
 				}
-
-
-				// move to next pixel with increment x and y
-				f0 += 8 * dfx0;
-				f1 += 8 * dfx1;
-				f2 += 8 * dfx2;
 			}
 
 			// processing remaining pixels
 			int xLeft = startX + aligned;
+
+			float f0_left = lf0.A * xLeft + lf0.B * y + lf0.C;
+			float f1_left = lf1.A * xLeft + lf1.B * y + lf1.C;
+			float f2_left = lf2.A * xLeft + lf2.B * y + lf2.C;
+
 			for (int i = 0; i < leftover; i++) {
 				int xx = xLeft + i;
-				float f0_cur = f0 + i * dfx0;
-				float f1_cur = f1 + i * dfx1;
-				float f2_cur = f2 + i * dfx2;
-				if (f0_cur >= 0 && f1_cur >= 0 && f2_cur >= 0) {
-					float alpha, beta, gamma;
-					if (getCoordinates(vec2D((float)xx, (float)y), alpha, beta, gamma)) {
-						// Interpolate color, depth, and normals
-						colour c = interpolate(beta, gamma, alpha, v[0].rgb, v[1].rgb, v[2].rgb);
-						c.clampColour();
-						float depth = interpolate(beta, gamma, alpha, v[0].p[2], v[1].p[2], v[2].p[2]);
-						vec4 normal = interpolate(beta, gamma, alpha, v[0].normal, v[1].normal, v[2].normal);
-						normal.normalise();
+				float alpha = (f0_left + i * alphaDx * area) * area_inv;
+				float beta = (f1_left + i * betaDx * area) * area_inv;
+				float gamma = (f2_left + i * gammaDx * area) * area_inv;
 
-						// Perform Z-buffer test and apply shading
-						if (renderer.zbuffer(xx, y) > depth && depth > 0.01f) {
-							// typical shader begin
-							L.omega_i.normalise();
-							float dot = max(vec4::dot(L.omega_i, normal), 0.0f);
-							colour a = (c * kd) * (L.L * dot + (L.ambient * kd));
-							// typical shader end
-							unsigned char r, g, b;
-							a.toRGB(r, g, b);
-							renderer.canvas.draw(xx, y, r, g, b);
-							renderer.zbuffer(xx, y) = depth;
-						}
+
+
+				if (alpha >= 0 && beta >= 0 && gamma >= 0) {
+					// Interpolate color, depth, and normals
+					colour c = interpolate(beta, gamma, alpha, v[0].rgb, v[1].rgb, v[2].rgb);
+					c.clampColour();
+					float depth = interpolate(beta, gamma, alpha, v[0].p[2], v[1].p[2], v[2].p[2]);
+					vec4 normal = interpolate(beta, gamma, alpha, v[0].normal, v[1].normal, v[2].normal);
+					normal.normalise();
+
+					// Perform Z-buffer test and apply shading
+					if (renderer.zbuffer(xx, y) > depth && depth > 0.01f) {
+						// typical shader begin
+						float dot = max(vec4::dot(normalizedOmega, normal), 0.0f);
+						colour a = (c * kd) * (L.L * dot + (L.ambient * kd));
+						// typical shader end
+						unsigned char r, g, b;
+						a.toRGB(r, g, b);
+						renderer.canvas.draw(xx, y, r, g, b);
+						//renderer.canvas.draw(xx, y, 255, 0, 0);
+						renderer.zbuffer(xx, y) = depth;
 					}
 				}
 			}
-
-			// end this row and to the next row
-			f0row += dfy0;
-			f1row += dfy1;
-			f2row += dfy2;
 		}
 	}
 

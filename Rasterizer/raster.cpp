@@ -50,6 +50,11 @@ void render(Renderer& renderer, Mesh* mesh, matrix& camera, Light& L) {
 			t[i].rgb = mesh->vertices[ind.v[i]].rgb;
 		}
 
+		// face culling
+		vec2D p0(t[0].p), p1(t[1].p), p2(t[2].p);
+		float cross = (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
+		if (cross < 0) continue;
+
 		// Clip triangles with Z-values outside [-1, 1]
 		if (fabs(t[0].p[2]) > 1.0f || fabs(t[1].p[2]) > 1.0f || fabs(t[2].p[2]) > 1.0f) continue;
 
@@ -336,11 +341,32 @@ void scene3() {
 	}
 }
 
-const int NUM_THREADS = 6;
+const int NUM_THREADS = 2;
 
 void renderChunk(Renderer& renderer, const std::vector<Mesh*>& chunk, matrix& camera, Light& L) {
 	for (auto& m : chunk) {
 		render(renderer, m, camera, L);
+	}
+}
+
+// 多线程渲染函数：将场景中的 Mesh 对象均匀分配给 numThreads 个线程
+void multithreadedRender(Renderer& renderer, const std::vector<Mesh*>& scene, matrix& camera,  Light& L, int numThreads) {
+	std::vector<std::thread> threads;
+	size_t totalMeshes = scene.size();
+	size_t meshesPerThread = (totalMeshes + numThreads - 1) / numThreads;  // 向上取整分配
+
+	for (int i = 0; i < numThreads; i++) {
+		size_t startIdx = i * meshesPerThread;
+		size_t endIdx = min(startIdx + meshesPerThread, totalMeshes);
+		if (startIdx >= endIdx)
+			break;
+		std::vector<Mesh*> threadMeshes(scene.begin() + startIdx, scene.begin() + endIdx);
+		threads.emplace_back(renderChunk, std::ref(renderer), threadMeshes, std::ref(camera), std::ref(L));
+	}
+
+	// 等待所有线程结束
+	for (auto& t : threads) {
+		t.join();
 	}
 }
 
@@ -395,23 +421,25 @@ void scene1Mt() {
 			}
 		}
 
-		// Multi-threaded
-		// 1. divide scene into NUM_THREADS parts
-		std::vector<std::vector<Mesh*>> chunks(NUM_THREADS);
-		for (size_t i = 0; i < scene.size(); i++) {
-			chunks[i % NUM_THREADS].push_back(scene[i]);
-		}
 
-		// 2. create and start threads
-		std::vector<std::thread> threads;
-		for (int t = 0; t < NUM_THREADS; t++) {
-			threads.emplace_back(renderChunk, std::ref(renderer), std::ref(chunks[t]), std::ref(camera), std::ref(L));
-		}
+		multithreadedRender(renderer, scene, camera, L, NUM_THREADS);
+		//// Multi-threaded
+		//// 1. divide scene into NUM_THREADS parts
+		//std::vector<std::vector<Mesh*>> chunks(NUM_THREADS);
+		//for (size_t i = 0; i < scene.size(); i++) {
+		//	chunks[i % NUM_THREADS].push_back(scene[i]);
+		//}
 
-		// 3. wait all threads done
-		for (auto& th : threads) {
-			th.join();
-		}
+		//// 2. create and start threads
+		//std::vector<std::thread> threads;
+		//for (int t = 0; t < NUM_THREADS; t++) {
+		//	threads.emplace_back(renderChunk, std::ref(renderer), std::ref(chunks[t]), std::ref(camera), std::ref(L));
+		//}
+
+		//// 3. wait all threads done
+		//for (auto& th : threads) {
+		//	th.join();
+		//}
 		renderer.present();
 	}
 
