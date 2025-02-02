@@ -64,6 +64,69 @@ void render(Renderer& renderer, Mesh* mesh, matrix& camera, Light& L) {
 	}
 }
 
+void renderMt(Renderer& renderer, Mesh* mesh, matrix& camera, Light& L) {
+	// Combine perspective, camera, and world transformations for the mesh
+	matrix p = renderer.perspective * camera * mesh->world;
+
+	// get all triangles
+	size_t totalTriangles = mesh->triangles.size();
+
+	// ensure thread number
+	unsigned int numThreads = 2;
+
+	// Calculate the number of triangles each thread needs to process
+	size_t chunkSize = (totalTriangles + numThreads - 1) / numThreads;
+
+	// store threads
+	std::vector<std::thread> threads;
+
+	// Allocate tasks to each thread
+	for (unsigned int t = 0; t < numThreads; t++) {
+		size_t startIndex = t * chunkSize;
+		size_t endIndex = min(startIndex + chunkSize, totalTriangles);
+		if (startIndex >= endIndex) break;
+
+		threads.emplace_back([startIndex, endIndex, &renderer, mesh, &camera, &L, &p]() {
+			for (size_t i = startIndex; i < endIndex; i++) {
+				triIndices& ind = mesh->triangles[i];
+
+				Vertex t[3];
+
+				// Transform each vertex of the triangle
+				for (unsigned int j = 0; j < 3; j++) {
+					t[j].p = p * mesh->vertices[ind.v[j]].p; // Apply transformations
+					t[j].p.divideW(); // Perspective division to normalize coordinates
+
+					// Transform normals into world space for accurate lighting
+					// no need for perspective correction as no shearing or non-uniform scaling
+					t[j].normal = mesh->world * mesh->vertices[ind.v[j]].normal;
+					t[j].normal.normalise();
+
+					// Map normalized device coordinates to screen space
+					t[j].p[0] = (t[j].p[0] + 1.f) * 0.5f * static_cast<float>(renderer.canvas.getWidth());
+					t[j].p[1] = (t[j].p[1] + 1.f) * 0.5f * static_cast<float>(renderer.canvas.getHeight());
+					t[j].p[1] = renderer.canvas.getHeight() - t[j].p[1]; // Invert y-axis
+
+					// Copy vertex colours
+					t[j].rgb = mesh->vertices[ind.v[j]].rgb;
+				}
+
+				// Clip triangles with Z-values outside [-1, 1]
+				if (fabs(t[0].p[2]) > 1.0f || fabs(t[1].p[2]) > 1.0f || fabs(t[2].p[2]) > 1.0f) continue;
+
+				// Create a triangle object and render it
+				triangle tri(t[0], t[1], t[2]);
+				tri.draw(renderer, L, mesh->ka, mesh->kd);
+			}
+			});
+	}
+
+	// wait all done
+	for (auto& thread : threads) {
+		thread.join();
+	}
+}
+
 // Test scene function to demonstrate rendering with user-controlled transformations
 // No input variables
 void sceneTest() {
@@ -565,23 +628,86 @@ void scene3Mt() {
 
 		if (renderer.canvas.keyPressed(VK_ESCAPE)) break;
 
-		// Multi-threaded
-		// 1. divide scene into NUM_THREADS parts
-		std::vector<std::vector<Mesh*>> chunks(NUM_THREADS);
-		for (size_t i = 0; i < scene.size(); i++) {
-			chunks[i % NUM_THREADS].push_back(scene[i]);
+		multithreadedRender(renderer, scene, camera, L, NUM_THREADS);
+		renderer.present();
+	}
+
+	for (auto& m : scene) {
+		delete m;
+	}
+}
+
+void scene3TriMt() {
+	Renderer renderer;
+	matrix camera = matrix::makeIdentity();
+	Light L{ vec4(0.f, 1.f, 1.f, 0.f),
+			 colour(1.0f, 1.0f, 1.0f),
+			 colour(0.1f, 0.1f, 0.1f) };
+
+	std::vector<Mesh*> scene;
+	struct rRot { float x; float y; float z; }; // Structure to store random rotation parameters
+	std::vector<rRot> rotations;
+
+	RandomNumberGenerator& rng = RandomNumberGenerator::getInstance();
+
+	for (int row = 0; row < 200; row++) {
+		for (int col = 0; col < 200; col++) {
+			Mesh* m = new Mesh();
+			*m = Mesh::makeCube(1.f);
+			scene.push_back(m);
+			// put in a location of grid
+			float px = -20.f + (col * 2.0f);
+			float py = 20.f - (row * 2.0f);
+			float pz = -20.f - row * 0.2f;
+			m->world = matrix::makeTranslation(px, py, pz);
+			// random rotation
+			rRot r{ rng.getRandomFloat(-.1f, .1f), rng.getRandomFloat(-.1f, .1f), rng.getRandomFloat(-.1f, .1f) };
+			rotations.push_back(r);
+
+		}
+	}
+
+	// Create a sphere and add it to the scene
+	Mesh* sphere = new Mesh();
+	*sphere = Mesh::makeSphere(1.0f, 10, 20);
+	scene.push_back(sphere);
+	float sphereOffset = -6.f;
+	float sphereStep = 0.1f;
+	sphere->world = matrix::makeTranslation(sphereOffset, 0.f, -6.f);
+
+	auto start = std::chrono::high_resolution_clock::now();
+	std::chrono::time_point<std::chrono::high_resolution_clock> end;
+	int cycle = 0;
+
+	bool running = true;
+	while (running) {
+		renderer.canvas.checkInput();
+		renderer.clear();
+
+		// update rotation world matrix
+		for (size_t i = 0; i < rotations.size(); i++) {
+			scene[i]->world = scene[i]->world *
+				matrix::makeRotateXYZ(rotations[i].x,
+					rotations[i].y,
+					rotations[i].z);
 		}
 
-		// 2. create and start threads
-		std::vector<std::thread> threads;
-		for (int t = 0; t < NUM_THREADS; t++) {
-			threads.emplace_back(renderChunk, std::ref(renderer), std::ref(chunks[t]), std::ref(camera), std::ref(L));
+		// Move the sphere back and forth
+		sphereOffset += sphereStep;
+		sphere->world = matrix::makeTranslation(sphereOffset, 0.f, -6.f);
+		if (sphereOffset > 6.0f || sphereOffset < -6.0f) {
+			sphereStep *= -1.f;
+			if (++cycle % 2 == 0) {
+				end = std::chrono::high_resolution_clock::now();
+				std::cout << cycle / 2 << " :" << std::chrono::duration<double, std::milli>(end - start).count() << "ms\n";
+				start = std::chrono::high_resolution_clock::now();
+			}
 		}
 
-		// 3. wait all threads done
-		for (auto& th : threads) {
-			th.join();
-		}
+		if (renderer.canvas.keyPressed(VK_ESCAPE)) break;
+
+		for (auto& m : scene)
+			renderMt(renderer, m, camera, L);
 		renderer.present();
 	}
 
@@ -597,9 +723,10 @@ int main() {
 	//scene1();
 	//scene2();
 	//scene3();
-	scene1Mt();
+	//scene1Mt();
 	//scene2Mt();
 	//scene3Mt();
+	//scene3TriMt();
 
 
 	return 0;
