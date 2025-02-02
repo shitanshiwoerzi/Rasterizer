@@ -45,11 +45,12 @@ public:
 
 // Class representing a triangle for rendering purposes
 class triangle {
-	Vertex v[3];       // Vertices of the triangle
 	float area;        // Area of the triangle
 	colour col[3];     // Colors for each vertex of the triangle
 
 public:
+	Vertex v[3];       // Vertices of the triangle
+
 	// Constructor initializes the triangle with three vertices
 	// Input Variables:
 	// - v1, v2, v3: Vertices defining the triangle

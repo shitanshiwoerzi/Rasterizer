@@ -17,6 +17,120 @@
 #include "light.h"
 #include "triangle.h"
 
+const int NUM_THREADS = 11;
+
+struct Tile {
+	int x, y;           // tile postion
+	int width, height;  // tile width & height
+	std::vector<triangle> triangles;
+};
+
+std::vector<Tile> createTiles(int screenWidth, int screenHeight, int tileSize) {
+	std::vector<Tile> tiles;
+	for (int y = 0; y < screenHeight; y += tileSize) {
+		for (int x = 0; x < screenWidth; x += tileSize) {
+			Tile tile;
+			tile.x = x;
+			tile.y = y;
+			tile.width = min(tileSize, screenWidth - x);
+			tile.height = min(tileSize, screenHeight - y);
+			tiles.push_back(tile);
+		}
+	}
+	return tiles;
+}
+
+void assignTrianglesToTiles(const std::vector<triangle>& triangles, std::vector<Tile>& tiles, int screenWidth, int screenHeight, int tileSize) {
+	int numTilesX = (screenWidth + tileSize - 1) / tileSize;
+	for (const auto& tri : triangles) {
+		// 假设 tri 中的顶点位置为 tri.v[0].p, tri.v[1].p, tri.v[2].p，且 p[0]、p[1] 为屏幕坐标
+		float minX = min(min(tri.v[0].p[0], tri.v[1].p[0]), tri.v[2].p[0]);
+		float maxX = max(max(tri.v[0].p[0], tri.v[1].p[0]), tri.v[2].p[0]);
+		float minY = min(min(tri.v[0].p[1], tri.v[1].p[1]), tri.v[2].p[1]);
+		float maxY = max(max(tri.v[0].p[1], tri.v[1].p[1]), tri.v[2].p[1]);
+
+		int tileStartX = max(0, static_cast<int>(minX) / tileSize);
+		int tileEndX = min((screenWidth - 1) / tileSize, static_cast<int>(maxX) / tileSize);
+		int tileStartY = max(0, static_cast<int>(minY) / tileSize);
+		int tileEndY = min((screenHeight - 1) / tileSize, static_cast<int>(maxY) / tileSize);
+
+		for (int ty = tileStartY; ty <= tileEndY; ty++) {
+			for (int tx = tileStartX; tx <= tileEndX; tx++) {
+				int index = ty * numTilesX + tx;
+				if (index < tiles.size()) {
+					tiles[index].triangles.push_back(tri);
+				}
+			}
+		}
+	}
+}
+
+void rasterizeTile(Tile& tile, Renderer& renderer, Light& L) {
+	for (auto& tri : tile.triangles) {
+		tri.draw(renderer, L, 1, 1);  // kd & ka = 1
+	}
+}
+
+void renderTiles(Renderer& renderer, std::vector<Tile>& tiles, Light& L) {
+	unsigned int numThreads = NUM_THREADS;
+	if (numThreads == 0)
+		numThreads = 2;
+	int numTiles = tiles.size();
+	int tilesPerThread = (numTiles + numThreads - 1) / numThreads;
+	std::vector<std::thread> workers;
+	for (unsigned int t = 0; t < numThreads; t++) {
+		int startTile = t * tilesPerThread;
+		int endTile = min(startTile + tilesPerThread, numTiles);
+		if (startTile >= endTile)
+			break;
+		workers.emplace_back([startTile, endTile, &tiles, &renderer, &L]() {
+			for (int i = startTile; i < endTile; i++) {
+				rasterizeTile(tiles[i], renderer, L);
+			}
+			});
+	}
+	for (auto& worker : workers) {
+		worker.join();
+	}
+}
+
+void processMesh(Renderer& renderer, Mesh* mesh, matrix& camera, Light& L, std::vector<triangle>& triangles) {
+	// Combine perspective, camera, and world transformations for the mesh
+	matrix p = renderer.perspective * camera * mesh->world;
+
+	// Iterate through all triangles in the mesh
+	for (triIndices& ind : mesh->triangles) {
+		Vertex t[3]; // Temporary array to store transformed triangle vertices
+
+		// Transform each vertex of the triangle
+		for (unsigned int i = 0; i < 3; i++) {
+			t[i].p = p * mesh->vertices[ind.v[i]].p; // Apply transformations
+			t[i].p.divideW(); // Perspective division to normalize coordinates
+
+			// Transform normals into world space for accurate lighting
+			// no need for perspective correction as no shearing or non-uniform scaling
+			t[i].normal = mesh->world * mesh->vertices[ind.v[i]].normal;
+			t[i].normal.normalise();
+
+			// Map normalized device coordinates to screen space
+			t[i].p[0] = (t[i].p[0] + 1.f) * 0.5f * static_cast<float>(renderer.canvas.getWidth());
+			t[i].p[1] = (t[i].p[1] + 1.f) * 0.5f * static_cast<float>(renderer.canvas.getHeight());
+			t[i].p[1] = renderer.canvas.getHeight() - t[i].p[1]; // Invert y-axis
+
+			// Copy vertex colours
+			t[i].rgb = mesh->vertices[ind.v[i]].rgb;
+		}
+
+		// Clip triangles with Z-values outside [-1, 1]
+		if (fabs(t[0].p[2]) > 1.0f || fabs(t[1].p[2]) > 1.0f || fabs(t[2].p[2]) > 1.0f) continue;
+
+		// Create a triangle object and render it
+		triangle tri(t[0], t[1], t[2]);
+		triangles.push_back(tri);
+		//tri.draw(renderer, L, mesh->ka, mesh->kd);
+	}
+}
+
 // Main rendering function that processes a mesh, transforms its vertices, applies lighting, and draws triangles on the canvas.
 // Input Variables:
 // - renderer: The Renderer object used for drawing.
@@ -404,8 +518,6 @@ void scene3() {
 	}
 }
 
-const int NUM_THREADS = 11;
-
 void renderChunk(Renderer& renderer, const std::vector<Mesh*>& chunk, matrix& camera, Light& L) {
 	for (auto& m : chunk) {
 		render(renderer, m, camera, L);
@@ -716,17 +828,106 @@ void scene3TriMt() {
 	}
 }
 
+void scene3TileMt() {
+	Renderer renderer;
+	matrix camera = matrix::makeIdentity();
+
+	Light L{ vec4(0.f, 1.f, 1.f, 0.f),
+			 colour(1.0f, 1.0f, 1.0f),
+			 colour(0.1f, 0.1f, 0.1f) };
+
+	std::vector<Mesh*> scene;
+	struct rRot { float x; float y; float z; }; // Structure to store random rotation parameters
+	std::vector<rRot> rotations;
+	std::vector<triangle> globalTriangles;
+
+	RandomNumberGenerator& rng = RandomNumberGenerator::getInstance();
+
+	for (int row = 0; row < 200; row++) {
+		for (int col = 0; col < 200; col++) {
+			Mesh* m = new Mesh();
+			*m = Mesh::makeCube(1.f);
+			scene.push_back(m);
+			// put in a location of grid
+			float px = -20.f + (col * 2.0f);
+			float py = 20.f - (row * 2.0f);
+			float pz = -20.f - row * 0.2f;
+			m->world = matrix::makeTranslation(px, py, pz);
+			// random rotation
+			rRot r{ rng.getRandomFloat(-.1f, .1f), rng.getRandomFloat(-.1f, .1f), rng.getRandomFloat(-.1f, .1f) };
+			rotations.push_back(r);
+
+		}
+	}
+
+	// Create a sphere and add it to the scene
+	Mesh* sphere = new Mesh();
+	*sphere = Mesh::makeSphere(1.0f, 10, 20);
+	scene.push_back(sphere);
+	float sphereOffset = -6.f;
+	float sphereStep = 0.1f;
+	sphere->world = matrix::makeTranslation(sphereOffset, 0.f, -6.f);
+
+	auto start = std::chrono::high_resolution_clock::now();
+	std::chrono::time_point<std::chrono::high_resolution_clock> end;
+	int cycle = 0;
+
+	bool running = true;
+	while (running) {
+		renderer.canvas.checkInput();
+		renderer.clear();
+		globalTriangles.clear();
+
+		for (size_t i = 0; i < rotations.size(); i++) {
+			scene[i]->world = scene[i]->world *
+				matrix::makeRotateXYZ(rotations[i].x,
+					rotations[i].y,
+					rotations[i].z);
+		}
+
+		// Move the sphere back and forth
+		sphereOffset += sphereStep;
+		sphere->world = matrix::makeTranslation(sphereOffset, 0.f, -6.f);
+		if (sphereOffset > 6.0f || sphereOffset < -6.0f) {
+			sphereStep *= -1.f;
+			if (++cycle % 2 == 0) {
+				end = std::chrono::high_resolution_clock::now();
+				std::cout << cycle / 2 << " :" << std::chrono::duration<double, std::milli>(end - start).count() << "ms\n";
+				start = std::chrono::high_resolution_clock::now();
+			}
+		}
+
+		if (renderer.canvas.keyPressed(VK_ESCAPE)) break;
+
+		for (auto& m : scene)
+			processMesh(renderer, m, camera, L, globalTriangles);
+
+		int screenWidth = renderer.canvas.getWidth();
+		int screenHeight = renderer.canvas.getHeight();
+		int tileSize = 32;
+		std::vector<Tile> tiles = createTiles(screenWidth, screenHeight, tileSize);
+		assignTrianglesToTiles(globalTriangles, tiles, screenWidth, screenHeight, tileSize);
+		renderTiles(renderer, tiles, L);
+		renderer.present();
+	}
+
+	for (auto& m : scene) {
+		delete m;
+	}
+}
+
 // Entry point of the application
 // No input variables
 int main() {
 	// Uncomment the desired scene function to run
-	//scene1();
+	scene1();
 	//scene2();
 	//scene3();
 	//scene1Mt();
 	//scene2Mt();
 	//scene3Mt();
 	//scene3TriMt();
+	//scene3TileMt();
 
 
 	return 0;
