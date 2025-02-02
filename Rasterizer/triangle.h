@@ -148,15 +148,6 @@ public:
 		__m256 b2 = _mm256_set1_ps(c2.b);
 		__m256 b3 = _mm256_set1_ps(c3.b);
 		b = _mm256_fmadd_ps(alpha, b1, _mm256_fmadd_ps(beta, b2, _mm256_mul_ps(gamma, b3)));
-		//// r = alpha * r1 + beta * r2 + gamma * r3
-		//r = _mm256_add_ps(_mm256_mul_ps(alpha, r1),
-		//	_mm256_add_ps(_mm256_mul_ps(beta, r2), _mm256_mul_ps(gamma, r3)));
-
-		//g = _mm256_add_ps(_mm256_mul_ps(alpha, g1),
-		//	_mm256_add_ps(_mm256_mul_ps(beta, g2), _mm256_mul_ps(gamma, g3)));
-
-		//b = _mm256_add_ps(_mm256_mul_ps(alpha, b1),
-		//	_mm256_add_ps(_mm256_mul_ps(beta, b2), _mm256_mul_ps(gamma, b3)));
 	}
 
 	// Draw the triangle on the canvas
@@ -195,17 +186,6 @@ public:
 		if (width <= 0) return;
 		int aligned = (width / 8) * 8; // divisible part
 		int leftover = width - aligned;
-
-		//// compute function of 3 lines in the start position
-		//float f0row = lf0.A * startX + lf0.B * startY + lf0.C;
-		//float f1row = lf1.A * startX + lf1.B * startY + lf1.C;
-		//float f2row = lf2.A * startX + lf2.B * startY + lf2.C;
-
-		////barycentric in start position
-		//float area_inv = 1.0f / area;
-		//float alpha0 = f0row * area_inv;
-		//float beta0 = f1row * area_inv;
-		//float gamma0 = f2row * area_inv;
 
 		// barycentric in start position
 		float area_inv = 1.0f / area;
@@ -281,7 +261,7 @@ public:
 						norm_y = _mm256_mul_ps(norm_y, inv_length);
 						norm_z = _mm256_mul_ps(norm_z, inv_length);
 
-						// 提取 'depth' 标量数据
+						// get 'depth' scalar
 						alignas(32) float depth_vals[8];
 						_mm256_storeu_ps(depth_vals, depth);
 
@@ -328,21 +308,14 @@ public:
 							_mm256_store_si256((__m256i*)g_vals, g_int);
 							_mm256_store_si256((__m256i*)b_vals, b_int);
 
-							//// 提取 `r, g, b` 标量数据
-							//alignas(32) float r_vals[8], g_vals[8], b_vals[8];
-							//_mm256_storeu_ps(r_vals, r);
-							//_mm256_storeu_ps(g_vals, g);
-							//_mm256_storeu_ps(b_vals, b);
-
-
-							// 写入颜色
+							// return rgb
 							unsigned char cr = static_cast<unsigned char>((r_vals[i]));
 							unsigned char cg = static_cast<unsigned char>((g_vals[i]));
 							unsigned char cb = static_cast<unsigned char>((b_vals[i]));
 							renderer.canvas.draw(px, y, cr, cg, cb);
 							//renderer.canvas.draw(px, y, 255, 255, 0);
 
-							// 更新 Z-buffer
+							// update Z-buffer
 							renderer.zbuffer(px, y) = depth_vals[i];
 						}
 					}
@@ -361,8 +334,6 @@ public:
 				float alpha = (f0_left + i * alphaDx * area) * area_inv;
 				float beta = (f1_left + i * betaDx * area) * area_inv;
 				float gamma = (f2_left + i * gammaDx * area) * area_inv;
-
-
 
 				if (alpha >= 0 && beta >= 0 && gamma >= 0) {
 					// Interpolate color, depth, and normals

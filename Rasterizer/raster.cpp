@@ -341,7 +341,7 @@ void scene3() {
 	}
 }
 
-const int NUM_THREADS = 2;
+const int NUM_THREADS = 11;
 
 void renderChunk(Renderer& renderer, const std::vector<Mesh*>& chunk, matrix& camera, Light& L) {
 	for (auto& m : chunk) {
@@ -349,11 +349,10 @@ void renderChunk(Renderer& renderer, const std::vector<Mesh*>& chunk, matrix& ca
 	}
 }
 
-// 多线程渲染函数：将场景中的 Mesh 对象均匀分配给 numThreads 个线程
 void multithreadedRender(Renderer& renderer, const std::vector<Mesh*>& scene, matrix& camera,  Light& L, int numThreads) {
 	std::vector<std::thread> threads;
 	size_t totalMeshes = scene.size();
-	size_t meshesPerThread = (totalMeshes + numThreads - 1) / numThreads;  // 向上取整分配
+	size_t meshesPerThread = (totalMeshes + numThreads - 1) / numThreads;
 
 	for (int i = 0; i < numThreads; i++) {
 		size_t startIdx = i * meshesPerThread;
@@ -364,7 +363,7 @@ void multithreadedRender(Renderer& renderer, const std::vector<Mesh*>& scene, ma
 		threads.emplace_back(renderChunk, std::ref(renderer), threadMeshes, std::ref(camera), std::ref(L));
 	}
 
-	// 等待所有线程结束
+	// wait all threads done
 	for (auto& t : threads) {
 		t.join();
 	}
@@ -421,25 +420,8 @@ void scene1Mt() {
 			}
 		}
 
-
 		multithreadedRender(renderer, scene, camera, L, NUM_THREADS);
-		//// Multi-threaded
-		//// 1. divide scene into NUM_THREADS parts
-		//std::vector<std::vector<Mesh*>> chunks(NUM_THREADS);
-		//for (size_t i = 0; i < scene.size(); i++) {
-		//	chunks[i % NUM_THREADS].push_back(scene[i]);
-		//}
 
-		//// 2. create and start threads
-		//std::vector<std::thread> threads;
-		//for (int t = 0; t < NUM_THREADS; t++) {
-		//	threads.emplace_back(renderChunk, std::ref(renderer), std::ref(chunks[t]), std::ref(camera), std::ref(L));
-		//}
-
-		//// 3. wait all threads done
-		//for (auto& th : threads) {
-		//	th.join();
-		//}
 		renderer.present();
 	}
 
@@ -506,23 +488,7 @@ void scene2Mt() {
 
 		if (renderer.canvas.keyPressed(VK_ESCAPE)) break;
 
-		// Multi-threaded
-		// 1. divide scene into NUM_THREADS parts
-		std::vector<std::vector<Mesh*>> chunks(NUM_THREADS);
-		for (size_t i = 0; i < scene.size(); i++) {
-			chunks[i % NUM_THREADS].push_back(scene[i]);
-		}
-
-		// 2. create and start threads
-		std::vector<std::thread> threads;
-		for (int t = 0; t < NUM_THREADS; t++) {
-			threads.emplace_back(renderChunk, std::ref(renderer), std::ref(chunks[t]), std::ref(camera), std::ref(L));
-		}
-
-		// 3. wait all threads done
-		for (auto& th : threads) {
-			th.join();
-		}
+		multithreadedRender(renderer, scene, camera, L, NUM_THREADS);
 		renderer.present();
 	}
 
@@ -628,10 +594,10 @@ void scene3Mt() {
 // No input variables
 int main() {
 	// Uncomment the desired scene function to run
-	scene1();
+	//scene1();
 	//scene2();
 	//scene3();
-	//scene1Mt();
+	scene1Mt();
 	//scene2Mt();
 	//scene3Mt();
 
